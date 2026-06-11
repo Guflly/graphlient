@@ -20,6 +20,12 @@ module Graphlient
       raise Graphlient::Errors::ClientError, e.message
     end
 
+    def to_query_string(**_kargs, &block)
+      Graphlient::Query.new do
+        instance_eval(&block)
+      end.to_s
+    end
+
     def execute(query, variables = nil)
       query_params = {}
       query_params[:context] = @options if @options
@@ -30,6 +36,7 @@ module Graphlient
       # see https://github.com/github-community-projects/graphql-client/pull/132
       # see https://github.com/exAspArk/graphql-errors/issues/2
       raise Graphlient::Errors::ExecutionError, rc if errors_in_result?(rc)
+
       rc
     rescue GraphQL::Client::Error => e
       raise Graphlient::Errors::ClientError, e.message
@@ -64,7 +71,7 @@ module Graphlient
     end
 
     def schema_path
-      return options[:schema_path].to_s if options[:schema_path]
+      options[:schema_path].to_s if options[:schema_path]
     end
 
     def client

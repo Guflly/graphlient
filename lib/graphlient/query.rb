@@ -39,6 +39,13 @@ module Graphlient
       query_str.strip
     end
 
+    # Appends a named fragment spread (`...fragment_name`) to the query string.
+    # Use instead of the deprecated `___Const` convention.
+    def spread(fragment_name)
+      @query_str << "\n#{indent}...#{fragment_name}"
+      @query_str << "\n#{indent}"
+    end
+
     private
 
     def evaluate(&block)
@@ -49,6 +56,7 @@ module Graphlient
 
     def resolve_fragment_constant(value)
       return nil unless (match = value.to_s.match(FRAGMENT_DEFITION))
+
       raw_const = match[:const].gsub('__', '::')
       @context[@last_block].eval(raw_const).tap do |const|
         msg = "Expected constant #{raw_const} to be GraphQL::Client::FragmentDefinition. Given #{const.class}"

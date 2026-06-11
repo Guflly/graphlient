@@ -6,13 +6,13 @@ gem 'rake'
 
 group :development, :test do
   gem 'activesupport', '< 6'
-  gem 'mutex_m'
+  gem 'mutex_m' # activesupport 5.x depends on mutex_m, removed from stdlib in Ruby 3.4
   gem 'ostruct'
 end
 
 group :development do
   gem 'byebug', platform: :ruby
-  gem 'rubocop', '0.56.0'
+  gem 'rubocop', '~> 1.0'
 end
 
 group :test do
