@@ -6,6 +6,8 @@ gem 'rake'
 
 group :development, :test do
   gem 'activesupport', '< 6'
+  gem 'mutex_m'
+  gem 'ostruct'
 end
 
 group :development do
@@ -24,4 +26,10 @@ group :test do
   gem 'sinatra'
   gem 'vcr'
   gem 'webmock'
+end
+
+group :danger do
+  gem 'danger'
+  gem 'danger-changelog'
+  gem 'danger-pr-comment'
 end
