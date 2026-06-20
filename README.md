@@ -17,7 +17,10 @@ A friendlier Ruby client for consuming GraphQL-based APIs. Built on top of your 
   - [Build Query Strings without Validation](#build-query-strings-without-validation)
   - [Dynamic vs. Static Queries](#dynamic-vs-static-queries)
   - [Generate Queries with Graphlient::Query](#generate-queries-with-graphlientquery)
-  - [Fragment Spreads](#fragment-spreads)
+  - [Fragment Spreads and Definitions in the DSL](#fragment-spreads-and-definitions-in-the-dsl)
+  - [Inline Fragments in the DSL](#inline-fragments-in-the-dsl)
+  - [Directives in the DSL](#directives-in-the-dsl)
+  - [Custom Scalar Types](#custom-scalar-types)
   - [Create API Client Classes with Graphlient::Extension::Query](#create-api-client-classes-with-graphlientextensionquery)
   - [Swapping the HTTP Stack](#swapping-the-http-stack)
   - [Testing with Graphlient and RSpec](#testing-with-graphlient-and-rspec)
@@ -390,7 +393,87 @@ query.to_s
 # "\nquery {\n  invoice(id: 10){\n    line_items\n    }\n  }\n"
 ```
 
-### Use of Fragments
+### Fragment Spreads and Definitions in the DSL
+
+Use `spread` to insert a named fragment spread (`...FragmentName`) in a DSL block:
+
+```ruby
+client.query do
+  query do
+    invoice(id: 10) do
+      id
+      spread :InvoiceFields   # → ...InvoiceFields
+    end
+  end
+end
+```
+
+Define the fragment body inline with `fragment` — graphlient assembles the complete
+query string automatically, no external tooling needed:
+
+```ruby
+client.query do
+  fragment(:InvoiceFields, on: :Invoice) do
+    id
+    feeInCents
+  end
+
+  query do
+    invoice(id: 10) do
+      spread :InvoiceFields
+    end
+  end
+end
+```
+
+Produces and sends:
+
+```graphql
+query {
+  invoice(id: 10) {
+    ...InvoiceFields
+  }
+}
+
+fragment InvoiceFields on Invoice {
+  id
+  feeInCents
+}
+```
+
+Because the fragment is defined inline in the same query block, graphql-client treats it
+as part of the same document — all fragment fields are directly accessible on the response
+wrapper with no extra wrapping step:
+
+```ruby
+response = client.query do
+  fragment(:InvoiceFields, on: :Invoice) do
+    id
+    feeInCents
+  end
+
+  query do
+    invoice(id: 10) do
+      spread :InvoiceFields
+    end
+  end
+end
+
+response.data.invoice.id            # 10
+response.data.invoice.fee_in_cents  # 20000
+```
+
+Multiple fragments are supported. Fragments are scoped to the query call — no global
+registry, no cross-contamination between requests.
+
+You can also apply a directive to a spread (see [Directives in the DSL](#directives-in-the-dsl)):
+
+```ruby
+spread :InvoiceFields, _skip(if: :skip_invoice)
+# → ...InvoiceFields @skip(if: $skip_invoice)
+```
+
+### Use of Fragments (graphql-client style)
 
 [Fragments](https://github.com/github-community-projects/graphql-client#defining-queries) should be referred by constant:
 
@@ -423,7 +506,12 @@ end
 ```
 
 The wrapped response only allows access to fields that have been explicitly asked for.
-In this example, while `id` has been referenced directly in the main query, `feeInCents` has been spread via fragment and trying to access it in the original wrapped response will throw [`GraphQL::Client::ImplicitlyFetchedFieldError`](https://github.com/github-community-projects/graphql-client/blob/master/guides/implicitly-fetched-field-error.md) (to prevent data leaks between components).
+In this example, while `id` has been referenced directly in the main query, `feeInCents`
+has been spread via an **external fragment constant** and trying to access it in the
+original wrapped response will throw
+[`GraphQL::Client::ImplicitlyFetchedFieldError`](https://github.com/github-community-projects/graphql-client/blob/master/guides/implicitly-fetched-field-error.md).
+This is graphql-client's component-isolation mechanism: each fragment constant "owns" the
+fields it declares, preventing accidental data access across component boundaries.
 
 ```ruby
 response = client.execute(invoice_query)
@@ -446,39 +534,134 @@ invoice.fee_in_cents
 # 20000
 ```
 
-### Fragment Spreads
+> **Note:** This component-isolation behaviour only applies to external fragment constants
+> (the `___` / `__` pattern). Fragments defined inline via the `fragment` DSL in the same
+> query block are not subject to this restriction — their fields are accessible directly
+> on the operation response (see [Fragment Spreads and Definitions in the DSL](#fragment-spreads-and-definitions-in-the-dsl)).
 
-Use `spread` to emit a named fragment spread (`...FragmentName`) inside a DSL block.
-This is a cleaner alternative to the `___Const__Name` triple-underscore convention.
+### Inline Fragments in the DSL
+
+Use `spread(on: :TypeName)` for inline fragments (`... on Type { }`), useful for union
+types and interface implementations. It's the same `spread` verb as named fragment
+spreads, and the same `on:` keyword as `fragment(name, on:)`:
 
 ```ruby
-query_str = client.to_query_string do
+client.query do
   query do
     invoice(id: 10) do
+      spread(on: :PaidInvoice) do
+        amountPaid
+      end
+      spread(on: :UnpaidInvoice) do
+        amountDue
+      end
+    end
+  end
+end
+```
+
+Produces:
+
+```graphql
+query {
+  invoice(id: 10) {
+    ... on PaidInvoice {
+      amountPaid
+    }
+    ... on UnpaidInvoice {
+      amountDue
+    }
+  }
+}
+```
+
+Directives can be applied to inline fragments too (see [Directives in the DSL](#directives-in-the-dsl)):
+
+```ruby
+spread(_skip(if: :skip_drafts), on: :DraftInvoice) { draftId }
+# → ... on DraftInvoice @skip(if: $skip_drafts) { draftId }
+```
+
+### Directives in the DSL
+
+Apply GraphQL directives to fields, spreads, and inline fragments using the `_name`
+convention — any method starting with `_` followed by a lowercase letter is treated
+as a directive (`_skip` → `@skip`, `_include` → `@include`, `_myDirective` → `@myDirective`).
+
+**On a field:**
+
+```ruby
+client.query(some_id: :int, skip_fee: :boolean!) do
+  query(some_id: :int, skip_fee: :boolean!) do
+    invoice(id: :some_id) do
       id
-      spread :InvoiceFields    # → ...InvoiceFields
+      feeInCents _skip(if: :skip_fee)   # → feeInCents @skip(if: $skip_fee)
     end
   end
 end
 ```
 
-Multiple spreads at the same level are supported:
+**On a fragment spread:**
 
 ```ruby
-client.to_query_string do
-  query do
-    invoice(id: 10) do
-      spread :CoreFields
-      spread :AuditFields
-    end
-  end
+spread :InvoiceFields, _skip(if: :skip_invoice)
+# → ...InvoiceFields @skip(if: $skip_invoice)
+```
+
+**On an inline fragment:**
+
+```ruby
+spread(_skip(if: :skip_drafts), on: :DraftInvoice) { draftId }
+# → ... on DraftInvoice @skip(if: $skip_drafts) { draftId }
+```
+
+**Multiple directives on one field:**
+
+```ruby
+feeInCents _skip(if: :skip_fee), _include(if: :show_cents)
+# → feeInCents @skip(if: $skip_fee) @include(if: $show_cents)
+```
+
+**No-argument directive:**
+
+```ruby
+legacyField _deprecated
+# → legacyField @deprecated
+```
+
+The directive value is a plain Ruby method call that returns a `Directive` object
+before the field method runs, ensuring the directive appears in the correct position
+in the output string regardless of Ruby's evaluation order.
+
+### Custom Scalar Types
+
+By default, graphlient maps `:int → Int`, `:float → Float`, `:string → String`, and
+`:boolean → Boolean` for variable type declarations. Register additional scalar types
+in the client initialiser block:
+
+```ruby
+client = Graphlient::Client.new('https://example.com/graphql') do |c|
+  c.scalar :date,    'Date'
+  c.scalar :uuid,    'UUID'
+  c.scalar :decimal, 'Decimal'
 end
 ```
 
-`spread` works in both `to_query_string` and the standard `parse`/`query` execution
-paths. The caller is responsible for appending the fragment definition to the query
-string before sending it to the server, or for using a framework layer that handles
-fragment assembly automatically.
+Use the registered symbol in variable declarations:
+
+```ruby
+client.query(created_after: Date.today.iso8601, order_id: :uuid) do
+  query(created_after: :date, order_id: :uuid!) do
+    orders(created_after: :created_after, id: :order_id) do
+      id
+      total
+    end
+  end
+end
+# → query($created_after: Date, $order_id: UUID!) { ... }
+```
+
+Non-null variants work with `!`: `:date!` → `Date!`.
 
 ### Create API Client Classes with Graphlient::Extension::Query
 
