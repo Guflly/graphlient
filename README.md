@@ -181,7 +181,7 @@ Unlike graphql-client, Graphlient will always raise an exception unless the quer
 * [Graphlient::Errors::FaradayServerError](lib/graphlient/errors/faraday_server_error.rb): this inherits from `ServerError` ☝️, we recommend using `ServerError` to rescue these
 * [Graphlient::Errors::HttpServerError](lib/graphlient/errors/http_server_error.rb): this inherits from `ServerError` ☝️, we recommend using `ServerError` to rescue these
 * [Graphlient::Errors::ConnectionFailedError](lib/graphlient/errors/connection_failed_error.rb): this inherits from `ServerError` ☝️, we recommend using `ServerError` to rescue these
-* [Graphlient::Errors::TimeoutError](lib/graphlient/errors/timeout_error.rb): this inherits from `ServerError` ☝️, we recommend using `ServerError` to rescue these
+* [Graphlient::Errors::TimeoutError](lib/graphlient/errors/timeout_error.rb): all client-side timeouts raised by the Faraday adapter. This does not inherit from `ServerError` because no server response or status code is available; rescue `TimeoutError` separately
 * [Graphlient::Errors::HttpOptionsError](lib/graphlient/errors/http_options_error.rb): all NoMethodError raised by HTTP Adapters when given options in `http_options` are invalid
 
 
